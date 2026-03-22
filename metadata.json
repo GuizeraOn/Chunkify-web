@@ -1,0 +1,5 @@
+{
+  "name": "Chunkify",
+  "description": "A professional text-splitting tool that intelligently divides long content into manageable chunks based on character limits and punctuation.",
+  "requestFramePermissions": []
+}
