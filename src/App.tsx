@@ -100,7 +100,7 @@ export default function App() {
 
   const copyAllChunks = async () => {
     try {
-      const allText = chunks.join('\n');
+      const allText = chunks.join('\n\n');
       await navigator.clipboard.writeText(allText);
       setIsCopiedAll(true);
       setTimeout(() => setIsCopiedAll(false), 2000);
