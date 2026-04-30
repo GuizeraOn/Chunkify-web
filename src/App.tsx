@@ -65,6 +65,7 @@ export default function App() {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [isDetailedViewOpen, setIsDetailedViewOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
+  const [isCopiedAll, setIsCopiedAll] = useState(false);
 
   // Apply dark mode class to html element
   useEffect(() => {
@@ -96,6 +97,18 @@ export default function App() {
       console.error('Failed to copy text: ', err);
     }
   };
+
+  const copyAllChunks = async () => {
+    try {
+      const allText = chunks.join('\n');
+      await navigator.clipboard.writeText(allText);
+      setIsCopiedAll(true);
+      setTimeout(() => setIsCopiedAll(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy all chunks: ', err);
+    }
+  };
+
 
   const totalChars = inputText.length;
   const estimatedChunks = Math.ceil(totalChars / charLimit);
@@ -213,9 +226,31 @@ export default function App() {
                     <ListChecks className="w-5 h-5 text-emerald-500" />
                     Quick Copy Previews
                   </h2>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
-                    <Info className="w-3 h-3" />
-                    Compact list for fast copying
+                  <div className="flex items-center gap-2 text-xs">
+                    <Button 
+                      size="sm" 
+                      variant={isCopiedAll ? "default" : "outline"}
+                      className={`h-8 transition-all duration-200 ${isCopiedAll ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600" : ""}`}
+                      onClick={copyAllChunks}
+                    >
+                      {isCopiedAll ? (
+                        <>
+                          <Check className="w-4 h-4 mr-1 sm:mr-2" />
+                          <span className="hidden sm:inline">Copied All</span>
+                          <span className="sm:hidden">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4 mr-1 sm:mr-2" />
+                          <span className="hidden sm:inline">Copy All</span>
+                          <span className="sm:hidden">All</span>
+                        </>
+                      )}
+                    </Button>
+                    <div className="hidden sm:flex items-center gap-1 text-muted-foreground bg-muted px-2 py-1 rounded-full">
+                      <Info className="w-3 h-3" />
+                      Compact list for fast copying
+                    </div>
                   </div>
                 </div>
 
