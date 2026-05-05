@@ -66,6 +66,9 @@ export default function App() {
   const [isDetailedViewOpen, setIsDetailedViewOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
   const [isCopiedAll, setIsCopiedAll] = useState(false);
+  const [removeNewlines, setRemoveNewlines] = useState(true);
+  const [findText, setFindText] = useState('');
+  const [replaceText, setReplaceText] = useState('');
 
   // Apply dark mode class to html element
   useEffect(() => {
@@ -107,6 +110,12 @@ export default function App() {
     } catch (err) {
       console.error('Failed to copy all chunks: ', err);
     }
+  };
+
+  const handleReplace = () => {
+    if (!findText) return;
+    const newText = inputText.split(findText).join(replaceText);
+    setInputText(newText);
   };
 
 
@@ -164,7 +173,13 @@ export default function App() {
                 placeholder="Paste your long text here..."
                 className="min-h-[300px] resize-y focus:ring-primary"
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
+                onChange={(e) => {
+                  let val = e.target.value;
+                  if (removeNewlines) {
+                    val = val.replace(/[\r\n]+/g, ' ');
+                  }
+                  setInputText(val);
+                }}
                 id="main-input"
               />
               <div className="flex justify-between text-xs text-muted-foreground px-1">
@@ -173,7 +188,49 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-4 items-end">
+            {/* Find & Replace and Options */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/30 p-4 rounded-lg border border-border">
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Find & Replace</Label>
+                <div className="flex gap-2">
+                  <Input 
+                    placeholder="Find..." 
+                    value={findText} 
+                    onChange={e => setFindText(e.target.value)} 
+                    className="h-8 text-sm bg-background" 
+                  />
+                  <Input 
+                    placeholder="Replace with..." 
+                    value={replaceText} 
+                    onChange={e => setReplaceText(e.target.value)} 
+                    className="h-8 text-sm bg-background" 
+                  />
+                  <Button size="sm" onClick={handleReplace} variant="secondary" className="h-8 whitespace-nowrap">
+                    Replace All
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Formatting Options</Label>
+                <div className="flex items-center space-x-2 pt-1 h-8">
+                  <Switch 
+                    id="remove-newlines" 
+                    checked={removeNewlines} 
+                    onCheckedChange={(checked) => {
+                      setRemoveNewlines(checked);
+                      if (checked) {
+                        setInputText(prev => prev.replace(/[\r\n]+/g, ' '));
+                      }
+                    }} 
+                  />
+                  <Label htmlFor="remove-newlines" className="text-sm cursor-pointer font-normal">
+                    Auto-remove line breaks
+                  </Label>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4 items-end pt-2">
               <div className="flex-1 space-y-2 w-full">
                 <Label htmlFor="limit" className="text-sm font-medium">
                   Character Limit per Chunk
