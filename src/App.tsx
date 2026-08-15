@@ -120,6 +120,7 @@ export default function App() {
 
 
   const totalChars = inputText.length;
+  const totalWords = inputText.trim() ? inputText.trim().split(/\s+/).length : 0;
   const estimatedChunks = Math.ceil(totalChars / charLimit);
 
   return (
@@ -183,7 +184,7 @@ export default function App() {
                 id="main-input"
               />
               <div className="flex justify-between text-xs text-muted-foreground px-1">
-                <span>Characters: {totalChars.toLocaleString()}</span>
+                <span>Characters: {totalChars.toLocaleString()} · Words: {totalWords.toLocaleString()}</span>
                 <span>Est. Chunks: {estimatedChunks}</span>
               </div>
             </div>
