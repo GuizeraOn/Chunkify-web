@@ -14,8 +14,27 @@ import { Copy, Check, Scissors, Trash2, Info, ChevronDown, ChevronUp, ListChecks
 import { motion, AnimatePresence } from 'motion/react';
 
 /**
- * Section 2: Text-Splitting Utility Function
+ * Section 2: Text-Splitting Utility Functions
  */
+
+/** Best index to cut `text` so the first piece stays within `limit` chars. */
+const findSplitIndex = (text: string, limit: number): number => {
+  const slice = text.substring(0, limit);
+
+  const lastPunctuation = Math.max(
+    slice.lastIndexOf('.'),
+    slice.lastIndexOf('!'),
+    slice.lastIndexOf('?')
+  );
+
+  if (lastPunctuation !== -1 && lastPunctuation > limit * 0.5) {
+    return lastPunctuation + 1;
+  }
+
+  const lastSpace = slice.lastIndexOf(' ');
+  return lastSpace !== -1 ? lastSpace + 1 : limit;
+};
+
 const splitTextIntoChunks = (text: string, limit: number): string[] => {
   if (!text || limit <= 0) return [];
   if (text.length <= limit) return [text];
@@ -29,29 +48,120 @@ const splitTextIntoChunks = (text: string, limit: number): string[] => {
       break;
     }
 
-    let slice = remainingText.substring(0, limit);
-    
-    const lastPunctuation = Math.max(
-      slice.lastIndexOf('.'),
-      slice.lastIndexOf('!'),
-      slice.lastIndexOf('?')
-    );
-
-    let splitIndex = -1;
-
-    if (lastPunctuation !== -1 && lastPunctuation > limit * 0.5) {
-      splitIndex = lastPunctuation + 1;
-    } else {
-      const lastSpace = slice.lastIndexOf(' ');
-      if (lastSpace !== -1) {
-        splitIndex = lastSpace + 1;
-      } else {
-        splitIndex = limit;
-      }
-    }
-
+    const splitIndex = findSplitIndex(remainingText, limit);
     chunks.push(remainingText.substring(0, splitIndex).trim());
     remainingText = remainingText.substring(splitIndex).trim();
+  }
+
+  return chunks;
+};
+
+/**
+ * Speaker-aware splitting: a chunk never mixes two different speakers, and a
+ * speech too long for one chunk repeats its speaker label so every chunk says
+ * who is talking.
+ */
+interface SpeakerSegment {
+  /** Label without the colon, e.g. "[Dr. Alex Morgan]" or "Maria". */
+  label: string;
+  /** Marker exactly as written in the source, e.g. "[Dr. Alex Morgan]:". */
+  raw: string;
+  body: string;
+}
+
+// [Depoimento 6]: / [Dr. Alex Morgan]: — survives line-break removal.
+const BRACKET_SPEAKER = /\[[^\][\n]{1,80}\]\s*:/g;
+// Maria: / Dr. Alex Morgan: — only at the start of a line.
+const LINE_SPEAKER = /(?:^|\n)[ \t]*(\p{Lu}[^\n:]{0,60}):(?=\s|$)/gu;
+
+const isPlausibleSpeakerName = (label: string): boolean => {
+  const trimmed = label.trim();
+  if (!trimmed || trimmed.length > 60) return false;
+  // A sentence ending in ":" is not a speaker, but "Dr." style titles are fine.
+  if (/[.!?]$/.test(trimmed) && !/\b(Dr|Dra|Sr|Sra|Prof|Profa)\.$/.test(trimmed)) return false;
+  return trimmed.split(/\s+/).length <= 6;
+};
+
+const findSpeakerSegments = (text: string): SpeakerSegment[] => {
+  const markers: { start: number; end: number; label: string; raw: string }[] = [];
+
+  for (const match of text.matchAll(BRACKET_SPEAKER)) {
+    const start = match.index ?? 0;
+    markers.push({
+      start,
+      end: start + match[0].length,
+      label: match[0].replace(/\s*:$/, ''),
+      raw: match[0],
+    });
+  }
+
+  for (const match of text.matchAll(LINE_SPEAKER)) {
+    const label = match[1].trim();
+    if (!isPlausibleSpeakerName(label)) continue;
+    const matchStart = match.index ?? 0;
+    const start = matchStart + match[0].indexOf(match[1]);
+    const end = matchStart + match[0].length;
+    // Skip anything already covered by a bracketed marker.
+    if (markers.some((marker) => start < marker.end && end > marker.start)) continue;
+    markers.push({ start, end, label, raw: `${label}:` });
+  }
+
+  markers.sort((a, b) => a.start - b.start);
+
+  const segments: SpeakerSegment[] = [];
+  const intro = text.substring(0, markers.length ? markers[0].start : text.length).trim();
+  if (intro) segments.push({ label: '', raw: '', body: intro });
+
+  markers.forEach((marker, index) => {
+    const bodyEnd = index + 1 < markers.length ? markers[index + 1].start : text.length;
+    segments.push({
+      label: marker.label,
+      raw: marker.raw,
+      body: text.substring(marker.end, bodyEnd).trim(),
+    });
+  });
+
+  return segments;
+};
+
+const splitTextBySpeakers = (text: string, limit: number): string[] => {
+  if (!text || limit <= 0) return [];
+
+  const segments = findSpeakerSegments(text);
+  const labelledCount = segments.filter((segment) => segment.label).length;
+  // Nothing recognisable to keep apart — behave like the normal splitter.
+  if (labelledCount < 2) return splitTextIntoChunks(text, limit);
+
+  const chunks: string[] = [];
+
+  for (const segment of segments) {
+    const head = segment.raw ? `${segment.raw} ` : '';
+    const whole = `${head}${segment.body}`.trim();
+    if (!whole) continue;
+
+    if (whole.length <= limit) {
+      chunks.push(whole);
+      continue;
+    }
+
+    const continuationPrefix = segment.label ? `${segment.label} (cont.): ` : '';
+    let remaining = segment.body.trim();
+    let isFirst = true;
+
+    while (remaining.length > 0) {
+      const prefix = isFirst ? head : continuationPrefix;
+      const available = Math.max(20, limit - prefix.length);
+
+      if (remaining.length <= available) {
+        chunks.push(`${prefix}${remaining}`.trim());
+        break;
+      }
+
+      const splitIndex = findSplitIndex(remaining, available);
+      chunks.push(`${prefix}${remaining.substring(0, splitIndex).trim()}`.trim());
+      remaining = remaining.substring(splitIndex).trim();
+      isFirst = false;
+    }
   }
 
   return chunks;
@@ -67,6 +177,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
   const [isCopiedAll, setIsCopiedAll] = useState(false);
   const [removeNewlines, setRemoveNewlines] = useState(true);
+  const [speakerMode, setSpeakerMode] = useState(false);
   const [findText, setFindText] = useState('');
   const [replaceText, setReplaceText] = useState('');
 
@@ -80,10 +191,12 @@ export default function App() {
   }, [isDarkMode]);
 
   const handleSplit = useCallback(() => {
-    const result = splitTextIntoChunks(inputText, charLimit);
+    const result = speakerMode
+      ? splitTextBySpeakers(inputText, charLimit)
+      : splitTextIntoChunks(inputText, charLimit);
     setChunks(result);
     setIsDetailedViewOpen(false);
-  }, [inputText, charLimit]);
+  }, [inputText, charLimit, speakerMode]);
 
   const handleClear = () => {
     setInputText('');
@@ -130,23 +243,23 @@ export default function App() {
         <div className="flex flex-col items-center space-y-4 relative">
           <div className="absolute top-0 right-0 flex items-center space-x-2 bg-card/50 p-2 rounded-lg border border-border backdrop-blur-sm">
             <Sun className="h-4 w-4 text-muted-foreground" />
-            <Switch 
-              id="theme-toggle" 
-              checked={isDarkMode} 
-              onCheckedChange={setIsDarkMode} 
+            <Switch
+              id="theme-toggle"
+              checked={isDarkMode}
+              onCheckedChange={setIsDarkMode}
             />
             <Moon className="h-4 w-4 text-muted-foreground" />
           </div>
 
           <div className="text-center space-y-2 pt-8 sm:pt-0">
-            <motion.h1 
+            <motion.h1
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               className="text-4xl font-bold tracking-tight sm:text-5xl"
             >
               Chunkify
             </motion.h1>
-            <motion.p 
+            <motion.p
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2 }}
@@ -194,17 +307,17 @@ export default function App() {
               <div className="space-y-3">
                 <Label className="text-sm font-medium">Find & Replace</Label>
                 <div className="flex gap-2">
-                  <Input 
-                    placeholder="Find..." 
-                    value={findText} 
-                    onChange={e => setFindText(e.target.value)} 
-                    className="h-8 text-sm bg-background" 
+                  <Input
+                    placeholder="Find..."
+                    value={findText}
+                    onChange={e => setFindText(e.target.value)}
+                    className="h-8 text-sm bg-background"
                   />
-                  <Input 
-                    placeholder="Replace with..." 
-                    value={replaceText} 
-                    onChange={e => setReplaceText(e.target.value)} 
-                    className="h-8 text-sm bg-background" 
+                  <Input
+                    placeholder="Replace with..."
+                    value={replaceText}
+                    onChange={e => setReplaceText(e.target.value)}
+                    className="h-8 text-sm bg-background"
                   />
                   <Button size="sm" onClick={handleReplace} variant="secondary" className="h-8 whitespace-nowrap">
                     Replace All
@@ -213,21 +326,43 @@ export default function App() {
               </div>
               <div className="space-y-3">
                 <Label className="text-sm font-medium">Formatting Options</Label>
-                <div className="flex items-center space-x-2 pt-1 h-8">
-                  <Switch 
-                    id="remove-newlines" 
-                    checked={removeNewlines} 
+                <div className="flex items-center space-x-2 pt-1">
+                  <Switch
+                    id="remove-newlines"
+                    checked={removeNewlines}
                     onCheckedChange={(checked) => {
                       setRemoveNewlines(checked);
                       if (checked) {
                         setInputText(prev => prev.replace(/[\r\n]+/g, ' '));
                       }
-                    }} 
+                    }}
                   />
                   <Label htmlFor="remove-newlines" className="text-sm cursor-pointer font-normal">
                     Auto-remove line breaks
                   </Label>
                 </div>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="speaker-mode"
+                    checked={speakerMode}
+                    onCheckedChange={(checked) => {
+                      setSpeakerMode(checked);
+                      // Plain "Name:" labels only survive if line breaks are kept.
+                      if (checked) setRemoveNewlines(false);
+                    }}
+                  />
+                  <Label htmlFor="speaker-mode" className="text-sm cursor-pointer font-normal">
+                    Contains speakers
+                  </Label>
+                </div>
+                {speakerMode && (
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Never puts two speakers in the same chunk. A long speech is continued
+                    with a <span className="font-medium">(cont.)</span> label so every chunk
+                    says who is talking. Detects <code>[Name]:</code> anywhere and{' '}
+                    <code>Name:</code> at the start of a line.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -246,8 +381,8 @@ export default function App() {
                 />
               </div>
               <div className="flex gap-2 w-full sm:w-auto">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={handleClear}
                   className="flex-1 sm:flex-none"
                   id="clear-button"
@@ -255,7 +390,7 @@ export default function App() {
                   <Trash2 className="w-4 h-4 mr-2" />
                   Clear
                 </Button>
-                <Button 
+                <Button
                   onClick={handleSplit}
                   disabled={!inputText.trim()}
                   className="flex-1 sm:flex-none shadow-sm"
@@ -285,8 +420,8 @@ export default function App() {
                     Quick Copy Previews
                   </h2>
                   <div className="flex items-center gap-2 text-xs">
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       variant={isCopiedAll ? "default" : "outline"}
                       className={`h-8 transition-all duration-200 ${isCopiedAll ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600" : ""}`}
                       onClick={copyAllChunks}
@@ -333,8 +468,8 @@ export default function App() {
                         size="sm"
                         variant={copiedIndex === index ? "default" : "outline"}
                         className={`flex-none h-8 px-3 transition-all duration-200 ${
-                          copiedIndex === index 
-                            ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600" 
+                          copiedIndex === index
+                            ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600"
                             : ""
                         }`}
                         onClick={() => copyToClipboard(chunk, index)}
@@ -406,8 +541,8 @@ export default function App() {
                                     size="sm"
                                     variant={copiedIndex === index ? "default" : "outline"}
                                     className={`w-full sm:w-auto transition-all duration-200 ${
-                                      copiedIndex === index 
-                                        ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600" 
+                                      copiedIndex === index
+                                        ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600"
                                         : ""
                                     }`}
                                     onClick={() => copyToClipboard(chunk, index)}
